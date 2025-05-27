@@ -222,7 +222,7 @@ class StratusGUI:
         self.notebook.add(self.attachments_frame, text="Attachments")
         self.package_frame = tb.Frame(self.attachments_frame)
         self.package_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
-        self.package_table = tb.Treeview(self.package_frame, columns=("name", "description", "assembly_count"),
+        self.package_table = tb.Treeview(self.package_frame, columns=("name", "assembly_count", "description"),
                                          show="headings", selectmode="extended", bootstyle="dark")
         self.package_table.heading("name", text="Name")
         self.package_table.heading("description", text="Description")
