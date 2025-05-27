@@ -223,7 +223,7 @@ class StratusGUI:
         self.package_frame = tb.Frame(self.attachments_frame)
         self.package_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         self.package_table = tb.Treeview(self.package_frame, columns=("name", "description", "assembly_count"),
-                                         show="headings", selectmode="browse", bootstyle="dark")
+                                         show="headings", selectmode="extended", bootstyle="dark")
         self.package_table.heading("name", text="Name")
         self.package_table.heading("description", text="Description")
         self.package_table.heading("assembly_count", text="Assembly Count")
@@ -284,7 +284,7 @@ class StratusGUI:
         self.assembly_frame = tb.Frame(self.attachments_frame)
         self.assembly_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
         self.assembly_table = tb.Treeview(self.assembly_frame, columns=("name", "description"),
-                                          show="headings", selectmode="browse", bootstyle="dark")
+                                          show="headings", selectmode="extended", bootstyle="dark")
         self.assembly_table.heading("name", text="Name")
         self.assembly_table.heading("description", text="Description")
         self.assembly_table.column("name", width=150)
