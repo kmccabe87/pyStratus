@@ -134,6 +134,7 @@ class StratusGUI:
         self.users = []
         self.containers = []
         self.health_data = []
+        self.tracking_statuses = []
         self.selected_package_id = None
         self.selected_assembly_id = None
         self.package_data = {}
@@ -385,21 +386,60 @@ class StratusGUI:
         # Activity Logs tab
         self.activity_frame = tb.Frame(self.notebook)
         self.notebook.add(self.activity_frame, text="Activity Logs")
-        self.activity_table = tb.Treeview(self.activity_frame,
-                                         columns=("createdDT", "referenceName"),
-                                         show="headings", bootstyle="dark")
-        self.activity_table.heading("createdDT", text="Created Date")
-        self.activity_table.heading("referenceName", text="Reference Name")
-        self.activity_table.column("createdDT", width=150)
-        self.activity_table.column("referenceName", width=150)
+        activity_columns = [
+            "createdDT", "createdByName", "divisionName", "route", "projectName", "projectNumber", "projectColor", 
+            "modelName", "reference", "referenceName", "action", "actionName", "name", "value", "trackingStatusName", 
+            "trackingStatusColor", "stationName"
+        ]
+        self.activity_table = tb.Treeview(
+            self.activity_frame,
+            columns=activity_columns,
+            show="headings",
+            bootstyle="dark"
+        )
+        for col in activity_columns:
+            display_name = ' '.join(word.capitalize() for word in col.split('_'))
+            self.activity_table.heading(col, text=display_name)
+            self.activity_table.column(col, width=100, anchor="w")
         self.activity_table.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
-        scrollbar = tb.Scrollbar(self.activity_frame, orient="vertical",
-                                 command=self.activity_table.yview, bootstyle="dark")
+        # Vertical scrollbar
+        v_scrollbar = tb.Scrollbar(
+            self.activity_frame,
+            orient="vertical",
+            command=self.activity_table.yview,
+            bootstyle="dark"
+        )
+        v_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.activity_table.configure(yscrollcommand=v_scrollbar.set)
+        # Horizontal scrollbar
+        h_scrollbar = tb.Scrollbar(
+            self.activity_frame,
+            orient="horizontal",
+            command=self.activity_table.xview,
+            bootstyle="dark"
+        )
+        h_scrollbar.grid(row=1, column=0, sticky="ew")
+        self.activity_table.configure(xscrollcommand=h_scrollbar.set)
+        self.activity_frame.columnconfigure(0, weight=1)
+        self.activity_frame.rowconfigure(0, weight=1)
+        
+                # Set column headings and widths
+        for col in activity_columns:
+            display_name = ' '.join(word.capitalize() for word in col.split('_'))
+            self.activity_table.heading(col, text=display_name)
+            self.activity_table.column(col, width=150, anchor="w")
+        self.activity_table.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        scrollbar = tb.Scrollbar(
+        self.activity_frame,
+        orient="vertical",
+        command=self.activity_table.yview,
+        bootstyle="dark"
+        )
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.activity_table.configure(yscrollcommand=scrollbar.set)
         self.activity_frame.columnconfigure(0, weight=1)
         self.activity_frame.rowconfigure(0, weight=1)
-
+        
         # Users tab
         self.users_frame = tb.Frame(self.notebook)
         self.notebook.add(self.users_frame, text="Users")
@@ -439,6 +479,30 @@ class StratusGUI:
         self.containers_table.configure(yscrollcommand=scrollbar.set)
         self.containers_frame.columnconfigure(0, weight=1)
         self.containers_frame.rowconfigure(0, weight=1)
+        
+                # Tracking Statuses tab
+        self.tracking_statuses_frame = tb.Frame(self.notebook)
+        self.notebook.add(self.tracking_statuses_frame, text="Tracking Statuses")
+        self.tracking_statuses_table = tb.Treeview(self.tracking_statuses_frame,
+                                                 columns=("name", "description", "color", "sequenceNumber", "canAddToAssembly"),
+                                                 show="headings", bootstyle="dark")
+        self.tracking_statuses_table.heading("name", text="Name")
+        self.tracking_statuses_table.heading("description", text="Description")
+        self.tracking_statuses_table.heading("color", text="Color")
+        self.tracking_statuses_table.heading("sequenceNumber", text="Sequence Number")
+        self.tracking_statuses_table.heading("canAddToAssembly", text="Can Add to Assembly")
+        self.tracking_statuses_table.column("name", width=150)
+        self.tracking_statuses_table.column("description", width=200)
+        self.tracking_statuses_table.column("color", width=100)
+        self.tracking_statuses_table.column("sequenceNumber", width=100)
+        self.tracking_statuses_table.column("canAddToAssembly", width=120)
+        self.tracking_statuses_table.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        scrollbar = tb.Scrollbar(self.tracking_statuses_frame, orient="vertical",
+                                 command=self.tracking_statuses_table.yview, bootstyle="dark")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.tracking_statuses_table.configure(yscrollcommand=scrollbar.set)
+        self.tracking_statuses_frame.columnconfigure(0, weight=1)
+        self.tracking_statuses_frame.rowconfigure(0, weight=1)
 
         # API Health tab
         self.health_frame = tb.Frame(self.notebook)
@@ -464,8 +528,19 @@ class StratusGUI:
             "activity_logs": False,
             "users": False,
             "containers": False,
-            "health": False
+            "health": False,
+            "tracking_statuses": False
         }
+        
+#------------------------------------------------------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------------------------------------------------------
 
     def on_tab_changed(self, event):
         """Fetch data for new tabs when selected."""
@@ -483,7 +558,10 @@ class StratusGUI:
         elif tab_name == "API Health" and not self.tab_data_fetched["health"]:
             self.fetch_health()
             self.tab_data_fetched["health"] = True
-
+        elif tab_name == "Tracking Statuses" and not self.tab_data_fetched["tracking_statuses"]:
+            self.fetch_tracking_statuses()
+            self.tab_data_fetched["tracking_statuses"] = True
+            
     def _clear_placeholder(self, event, placeholder):
         entry = event.widget
         if entry.get() == placeholder:
@@ -670,9 +748,14 @@ class StratusGUI:
         return total_count
 
     def fetch_activity_logs(self):
-        """Fetch activity logs."""
+        """Fetch activity logs with properties matching the table columns."""
         params = {
-            "include": "createdDT,referenceName",
+            "include": (
+                "createdDT,createdByName,divisionName,route,"
+                "projectName,projectNumber,projectColor,"
+                "modelName,reference,referenceName,action,actionName,name,value,"
+                "trackingStatusName,trackingStatusColor,stationName"
+            ),
             "pagesize": 1000,
             "disabletotal": True,
             "where": "createdDT ge DateTime.Now.AddDays(-30)"
@@ -686,17 +769,37 @@ class StratusGUI:
                 created_dt = log.get("createdDT", "")
                 if created_dt:
                     try:
-                        created_dt = datetime.fromisoformat(created_dt.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M:%S")
+                        created_dt = datetime.fromisoformat(
+                            created_dt.replace("Z", "+00:00")
+                        ).strftime("%Y-%m-%d %H:%M:%S")
                     except ValueError:
-                        pass
-                self.activity_table.insert("", "end",
-                                          values=(created_dt,
-                                                  log.get("referenceName", "")))
+                        created_dt = log.get("createdDT", "")
+                # Map values to the table columns
+                values = (
+                    created_dt,
+                    log.get("createdByName", ""),
+                    log.get("divisionName", ""),
+                    log.get("route", ""),
+                    log.get("projectName", ""),
+                    log.get("projectNumber", ""),
+                    log.get("projectColor", ""),
+                    log.get("modelName", ""),
+                    log.get("reference", ""),
+                    log.get("referenceName", ""),
+                    log.get("action", ""),
+                    log.get("actionName", ""),
+                    log.get("name", ""),
+                    log.get("value", ""),
+                    log.get("trackingStatusName", ""),
+                    log.get("trackingStatusColor", ""),
+                    log.get("stationName", "")
+                )
+                self.activity_table.insert("", "end", values=values)
             if not self.activity_logs:
                 messagebox.showinfo("No Activity Logs", "No activity logs found.")
-        except RequestException:
-            pass
-
+        except RequestException as e:
+            messagebox.showerror("Error", f"Failed to fetch activity logs: {e}")
+        
     def fetch_users(self):
         params = {"include": "id,firstName,lastName,email,status", "pagesize": 1000, "disabletotal": True}
         try:
@@ -776,7 +879,41 @@ class StratusGUI:
                 self.health_table.delete(item)
             self.health_data = []
             messagebox.showerror("Error", "Failed to fetch API health data.")
-
+            
+    def fetch_tracking_statuses(self):
+        """Fetch tracking statuses data from the /v1/company/tracking-statuses endpoint."""
+        params = {"include": "id,name,description,color,sequenceNumber,canAddToAssembly", 
+                  "pagesize": 1000, "disabletotal": True}
+        try:
+            response = make_api_request(f"{BASE_URL}/v1/company/tracking-statuses", 
+                                      HEADERS, params, "Fetch tracking statuses")
+            # Debug: Print raw response to inspect data
+            data = response.json()
+            print("Tracking Statuses Response:", data)  # Debug output
+            # Handle case where response is a list directly
+            if isinstance(data, list):
+                self.tracking_statuses = data
+            else:
+                self.tracking_statuses = data.get("data", []) if isinstance(data, dict) else []
+            for item in self.tracking_statuses_table.get_children():
+                self.tracking_statuses_table.delete(item)
+            for status in self.tracking_statuses:
+                # Debug: Print each status object to inspect fields
+                print("Processing Status:", status)
+                self.tracking_statuses_table.insert("", "end",
+                                                  values=(status.get("name", "N/A"),
+                                                          status.get("description", "N/A"),
+                                                          status.get("color", "N/A"),
+                                                          status.get("sequenceNumber", 0),
+                                                          str(status.get("canAddToAssembly", False))))
+            if not self.tracking_statuses:
+                messagebox.showinfo("No Tracking Statuses", "No tracking statuses found.")
+        except RequestException as e:
+            for item in self.tracking_statuses_table.get_children():
+                self.tracking_statuses_table.delete(item)
+            self.tracking_statuses = []
+            messagebox.showerror("Error", f"Failed to fetch tracking statuses data: {e}")
+            
     def on_package_select(self, event):
         selected = self.package_table.selection()
         if not selected:
@@ -1115,6 +1252,7 @@ class StratusGUI:
         self.fetch_users()
         self.fetch_containers()
         self.fetch_health()
+        self.fetch_tracking_statuses()
         self.notebook.select(current_tab)
 
 if __name__ == "__main__":
