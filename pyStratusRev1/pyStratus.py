@@ -1,5 +1,5 @@
 # pyStratus - A GUI application for managing GTP Stratus API data
-# Copyright (C) 2025 Your Name
+# Copyright (C) 2025 Kyle McCabe
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,14 +21,29 @@ from datetime import datetime
 from PIL import Image, ImageTk
 from requests.exceptions import RequestException, HTTPError
 from tkinter import Toplevel, messagebox, filedialog, StringVar
+import tkinter.font as tkfont
 import time
 import random
+import logging
+
+logging.basicConfig(level=logging.INFO)
 
 # API configuration
 BASE_URL = "https://api.gtpstratus.com"
 APPKEY_FILE = "appkey.txt"
-PROJECT_ENDPOINT = "/v2/project"
-PACKAGE_ENDPOINT = "/v1/package"
+ENDPOINTS = {
+    "project": "/v2/project",
+    "package": "/v1/package",
+    "activity": "/v1/activity",
+    "user": "/v2/user",
+    # ... etc ...
+}
+
+PAGE_SIZE = 1000
+
+NO_FILE_SELECTED = "No File Selected"
+NO_PACKAGE_SELECTED = "No Package Selected"
+NO_ASSEMBLY_SELECTED = "No Assembly Selected"
 
 def get_api_key(root):
     """Retrieve or prompt for API key and save it to appkey.txt."""
@@ -86,6 +101,7 @@ def get_api_key(root):
 
 def handle_request_error(e, action):
     """Centralized error handling for HTTP requests."""
+    logging.error(f"{action} failed: {e}", exc_info=True)
     if isinstance(e, HTTPError) and e.response.status_code == 429:
         retry_after = int(e.response.headers.get("Retry-After", 60))
         messagebox.showwarning("Rate Limit", f"Rate limit exceeded for {action}. Retry after {retry_after} seconds.")
@@ -121,7 +137,15 @@ def make_api_request(url, headers, params, action, retries=3, backoff_factor=1):
 class StratusGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("pyStratus")
+        self.setup_variables()
+        self.setup_main_frame()
+        self.setup_left_frame()
+        self.setup_notebook()
+        self.fetch_projects()
+
+    def setup_variables(self):
+        self.app_key = get_api_key(self.root)
+        self.headers = {"app-key": self.app_key, "Accept": "application/json"}
         self.projects = []
         self.all_projects = []
         self.packages = []
@@ -141,13 +165,13 @@ class StratusGUI:
         self.property_fields = {}
         self.initial_field_values = {}
 
-        # Main frame
+    def setup_main_frame(self):
         self.main_frame = tb.Frame(self.root, padding="10")
         self.main_frame.grid(row=0, column=0, sticky="nsew")
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
 
-        # Left frame for project selection
+    def setup_left_frame(self):
         self.left_frame = tb.Frame(self.main_frame)
         self.left_frame.grid(row=0, column=0, sticky="ns", padx=5)
 
@@ -161,34 +185,19 @@ class StratusGUI:
         self.project_dropdown.bind("<<ComboboxSelected>>", self.fetch_packages)
 
         # Project filter
-        self.project_filter = tb.Entry(self.left_frame, width=30, justify="center",
-                                      foreground="gray", font=("Arial", 10, ""))
+        self.project_filter = tb.Entry(self.left_frame, width=30, justify="center")
+        self.add_placeholder(self.project_filter, "Filter Projects")
         self.project_filter.grid(row=3, column=0, pady=5, sticky="w")
-        self.project_filter.insert(0, "Filter Projects")
-        self.project_filter.bind("<FocusIn>", lambda e: self._clear_placeholder(e, "Filter Projects"))
-        self.project_filter.bind("<FocusOut>", lambda e: self._restore_placeholder(e, "Filter Projects"))
-        self.project_filter.bind("<KeyRelease>", lambda e: self._on_filter_keyrelease(e, "projects"))
-        self.project_filter.bind("<Button-1>", lambda e: self.project_filter.focus_set())
 
         # Package filter
-        self.package_filter = tb.Entry(self.left_frame, width=30, justify="center",
-                                      foreground="gray", font=("Arial", 10, ""))
+        self.package_filter = tb.Entry(self.left_frame, width=30, justify="center")
+        self.add_placeholder(self.package_filter, "Filter Packages")
         self.package_filter.grid(row=5, column=0, pady=5, sticky="w")
-        self.package_filter.insert(0, "Filter Packages")
-        self.package_filter.bind("<FocusIn>", lambda e: self._clear_placeholder(e, "Filter Packages"))
-        self.project_filter.bind("<FocusOut>", lambda e: self._restore_placeholder(e, "Filter Packages"))
-        self.package_filter.bind("<KeyRelease>", lambda e: self._on_filter_keyrelease(e, "packages"))
-        self.package_filter.bind("<Button-1>", lambda e: self.package_filter.focus_set())
 
         # Assembly filter
-        self.assembly_filter = tb.Entry(self.left_frame, width=30, justify="center",
-                                       foreground="gray", font=("Arial", 10, ""))
+        self.assembly_filter = tb.Entry(self.left_frame, width=30, justify="center")
+        self.add_placeholder(self.assembly_filter, "Filter Assemblies")
         self.assembly_filter.grid(row=7, column=0, pady=5, sticky="w")
-        self.assembly_filter.insert(0, "Filter Assemblies")
-        self.assembly_filter.bind("<FocusIn>", lambda e: self._clear_placeholder(e, "Filter Assemblies"))
-        self.assembly_filter.bind("<FocusOut>", lambda e: self._restore_placeholder(e, "Filter Assemblies"))
-        self.assembly_filter.bind("<KeyRelease>", lambda e: self._on_filter_keyrelease(e, "assemblies"))
-        self.assembly_filter.bind("<Button-1>", lambda e: self.assembly_filter.focus_set())
 
         # Refresh and Close buttons
         self.refresh_button = tb.Button(self.left_frame, text="Refresh", command=self.refresh_tables,
@@ -212,6 +221,7 @@ class StratusGUI:
         self.app_logo.grid(row=14, column=0, columnspan=2, padx=10, pady=10, sticky="sw")
         self.left_frame.rowconfigure(14, weight=1)
 
+    def setup_notebook(self):
         # Notebook for tabs
         self.notebook = tb.Notebook(self.main_frame, bootstyle="dark")
         self.notebook.grid(row=0, column=1, sticky="nsew")
@@ -221,126 +231,122 @@ class StratusGUI:
         # Attachments tab
         self.attachments_frame = tb.Frame(self.notebook)
         self.notebook.add(self.attachments_frame, text="Attachments")
+
+        # Packages table
         self.package_frame = tb.Frame(self.attachments_frame)
         self.package_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
-        self.package_table = tb.Treeview(self.package_frame, columns=("name", "assembly_count", "description"),
-                                         show="headings", selectmode="extended", bootstyle="dark")
-        self.package_table.heading("name", text="Name")
-        self.package_table.heading("description", text="Description")
-        self.package_table.heading("assembly_count", text="Assembly Count")
-        self.package_table.column("name", width=150)
-        self.package_table.column("description", width=200)
-        self.package_table.column("assembly_count", width=100)
-        self.package_table.grid(row=0, column=0, sticky="nsew")
+        self.package_table = self.create_table_with_scrollbars(
+            self.package_frame,
+            columns=("name", "assembly_count", "description"),
+            column_widths=[150, 100, 200],
+            heading_map={"name": "Name", "assembly_count": "Assembly Count", "description": "Description"}
+        )
         self.package_table.bind("<<TreeviewSelect>>", self.on_package_select)
-        package_scrollbar = tb.Scrollbar(self.package_frame, orient="vertical",
-                                         command=self.package_table.yview, bootstyle="dark")
-        package_scrollbar.grid(row=0, column=1, sticky="ns")
-        self.package_table.configure(yscrollcommand=package_scrollbar.set)
         self.package_frame.columnconfigure(0, weight=1)
         self.package_frame.rowconfigure(0, weight=1)
+
+        # Package attachments table
         self.package_attachment_frame = tb.Frame(self.attachments_frame)
         self.package_attachment_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
-        self.package_attachment_table = tb.Treeview(self.package_attachment_frame,
-                                                   columns=("fileName", "createdDT"), show="headings",
-                                                   selectmode="extended", bootstyle="dark")
-        self.package_attachment_table.heading("fileName", text="File Name")
-        self.package_attachment_table.heading("createdDT", text="Created Date")
-        self.package_attachment_table.column("fileName", width=400)
-        self.package_attachment_table.column("createdDT", width=150)
-        self.package_attachment_table.grid(row=0, column=0, sticky="nsew")
+        self.package_attachment_table = self.create_table_with_scrollbars(
+            self.package_attachment_frame,
+            columns=("fileName", "createdDT"),
+            column_widths=[400, 150],
+            heading_map={"fileName": "File Name", "createdDT": "Created Date"}
+        )
         self.package_no_attachments_label = tb.Label(self.package_attachment_frame,
                                                     text="NO ATTACHMENTS", font=("Arial", 14, "bold"),
                                                     foreground="red", background="#2f2f2f")
         self.package_no_attachments_label.place(relx=0.5, rely=0.5, anchor="center")
         self.package_no_attachments_label.place_forget()
-        package_attachment_scrollbar = tb.Scrollbar(self.package_attachment_frame, orient="vertical",
-                                                   command=self.package_attachment_table.yview, bootstyle="dark")
-        package_attachment_scrollbar.grid(row=0, column=1, sticky="ns")
-        self.package_attachment_table.configure(yscrollcommand=package_attachment_scrollbar.set)
         self.package_attachment_frame.columnconfigure(0, weight=1)
         self.package_attachment_frame.rowconfigure(0, weight=1)
-        self.package_button_frame = tb.Frame(self.package_attachment_frame)
-        self.package_button_frame.grid(row=1, column=0, sticky="e", pady=5)
-        self.package_download_selected_button = tb.Button(self.package_button_frame, text="Download Selected",
-                                                         command=self.download_selected_package_attachments,
-                                                         width=20, bootstyle="primary")
-        self.package_download_selected_button.grid(row=0, column=0, padx=5, pady=5)
-        self.package_download_all_button = tb.Button(self.package_button_frame, text="Download All",
-                                                    command=self.download_all_package_attachments,
-                                                    width=20, bootstyle="primary")
-        self.package_download_all_button.grid(row=1, column=0, padx=5, pady=5)
-        self.package_upload_frame = tb.Frame(self.package_attachment_frame)
-        self.package_upload_frame.grid(row=2, column=0, sticky="e", pady=5)
+
+        # Download Selected button (row 2)
+        self.package_download_selected_button = tb.Button(
+            self.package_attachment_frame, text="Download Selected",
+            command=self.download_selected_package_attachments,
+            width=20, bootstyle="primary"
+        )
+        self.package_download_selected_button.grid(row=2, column=0, sticky="e", padx=5, pady=(8, 0))
+
+        # Download All button (row 3)
+        self.package_download_all_button = tb.Button(
+            self.package_attachment_frame, text="Download All",
+            command=self.download_all_package_attachments,
+            width=20, bootstyle="primary"
+        )
+        self.package_download_all_button.grid(row=3, column=0, sticky="e", padx=5, pady=(4, 0))
+
+        # Upload row (row 4)
         self.package_upload_var = StringVar()
-        self.package_upload_entry = tb.Entry(self.package_upload_frame, textvariable=self.package_upload_var,
+        self.package_upload_entry = tb.Entry(self.package_attachment_frame, textvariable=self.package_upload_var,
                                              width=30, state="readonly")
-        self.package_upload_entry.grid(row=0, column=0, padx=5)
-        self.package_browse_button = tb.Button(self.package_upload_frame, text="Browse File",
+        self.package_browse_button = tb.Button(self.package_attachment_frame, text="Browse File",
                                                command=self.browse_package_file, bootstyle="primary")
-        self.package_browse_button.grid(row=0, column=1, padx=5)
-        self.package_upload_button = tb.Button(self.package_upload_frame, text="Upload File",
+        self.package_upload_button = tb.Button(self.package_attachment_frame, text="Upload File",
                                                command=self.upload_package_attachment, bootstyle="primary")
-        self.package_upload_button.grid(row=0, column=2, padx=5)
+        self.package_browse_button.grid(row=4, column=0, sticky="w", padx=(0, 5), pady=(8, 0))
+        self.package_upload_entry.grid(row=4, column=0, sticky="e", padx=(0, 120), pady=(8, 0))
+        self.package_upload_button.grid(row=4, column=0, sticky="e", padx=(0, 5), pady=(8, 0))
+
+        # Assemblies table
         self.assembly_frame = tb.Frame(self.attachments_frame)
         self.assembly_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
-        self.assembly_table = tb.Treeview(self.assembly_frame, columns=("name", "description"),
-                                          show="headings", selectmode="extended", bootstyle="dark")
-        self.assembly_table.heading("name", text="Name")
-        self.assembly_table.heading("description", text="Description")
-        self.assembly_table.column("name", width=150)
-        self.assembly_table.column("description", width=200)
-        self.assembly_table.grid(row=0, column=0, sticky="nsew")
+        self.assembly_table = self.create_table_with_scrollbars(
+            self.assembly_frame,
+            columns=("name", "description"),
+            column_widths=[150, 200],
+            heading_map={"name": "Name", "description": "Description"}
+        )
         self.assembly_table.bind("<<TreeviewSelect>>", self.fetch_assembly_attachments)
-        assembly_scrollbar = tb.Scrollbar(self.assembly_frame, orient="vertical",
-                                          command=self.assembly_table.yview, bootstyle="dark")
-        assembly_scrollbar.grid(row=0, column=1, sticky="ns")
-        self.assembly_table.configure(yscrollcommand=assembly_scrollbar.set)
         self.assembly_frame.columnconfigure(0, weight=1)
         self.assembly_frame.rowconfigure(0, weight=1)
+
+        # Assembly attachments table
         self.assembly_attachment_frame = tb.Frame(self.attachments_frame)
         self.assembly_attachment_frame.grid(row=1, column=1, sticky="nsew", padx=5, pady=5)
-        self.assembly_attachment_table = tb.Treeview(self.assembly_attachment_frame,
-                                                    columns=("fileName", "createdDT"), show="headings",
-                                                    selectmode="extended", bootstyle="dark")
-        self.assembly_attachment_table.heading("fileName", text="File Name")
-        self.assembly_attachment_table.heading("createdDT", text="Created Date")
-        self.assembly_attachment_table.column("fileName", width=400)
-        self.assembly_attachment_table.column("createdDT", width=150)
-        self.assembly_attachment_table.grid(row=0, column=0, sticky="nsew")
+        self.assembly_attachment_table = self.create_table_with_scrollbars(
+            self.assembly_attachment_frame,
+            columns=("fileName", "createdDT"),
+            column_widths=[400, 150],
+            heading_map={"fileName": "File Name", "createdDT": "Created Date"}
+        )
         self.assembly_no_attachments_label = tb.Label(self.assembly_attachment_frame,
                                                      text="NO ATTACHMENTS", font=("Arial", 14, "bold"),
                                                      foreground="red", background="#2f2f2f")
         self.assembly_no_attachments_label.place(relx=0.5, rely=0.5, anchor="center")
         self.assembly_no_attachments_label.place_forget()
-        assembly_attachment_scrollbar = tb.Scrollbar(self.assembly_attachment_frame, orient="vertical",
-                                                    command=self.assembly_attachment_table.yview, bootstyle="dark")
-        assembly_attachment_scrollbar.grid(row=0, column=1, sticky="ns")
-        self.assembly_attachment_table.configure(yscrollcommand=assembly_attachment_scrollbar.set)
         self.assembly_attachment_frame.columnconfigure(0, weight=1)
         self.assembly_attachment_frame.rowconfigure(0, weight=1)
-        self.assembly_button_frame = tb.Frame(self.assembly_attachment_frame)
-        self.assembly_button_frame.grid(row=1, column=0, sticky="e", pady=5)
-        self.assembly_download_selected_button = tb.Button(self.assembly_button_frame, text="Download Selected",
-                                                          command=self.download_selected_assembly_attachments,
-                                                          width=20, bootstyle="primary")
-        self.assembly_download_selected_button.grid(row=0, column=0, padx=5, pady=5)
-        self.assembly_download_all_button = tb.Button(self.assembly_button_frame, text="Download All",
-                                                     command=self.download_all_assembly_attachments,
-                                                     width=20, bootstyle="primary")
-        self.assembly_download_all_button.grid(row=1, column=0, padx=5, pady=5)
-        self.assembly_upload_frame = tb.Frame(self.assembly_attachment_frame)
-        self.assembly_upload_frame.grid(row=2, column=0, sticky="e", pady=5)
+
+        # Download Selected button (row 2)
+        self.assembly_download_selected_button = tb.Button(
+            self.assembly_attachment_frame, text="Download Selected",
+            command=self.download_selected_assembly_attachments,
+            width=20, bootstyle="primary"
+        )
+        self.assembly_download_selected_button.grid(row=2, column=0, sticky="e", padx=5, pady=(8, 0))
+
+        # Download All button (row 3)
+        self.assembly_download_all_button = tb.Button(
+            self.assembly_attachment_frame, text="Download All",
+            command=self.download_all_assembly_attachments,
+            width=20, bootstyle="primary"
+        )
+        self.assembly_download_all_button.grid(row=3, column=0, sticky="e", padx=5, pady=(4, 0))
+
+        # Upload row (row 4)
         self.assembly_upload_var = StringVar()
-        self.assembly_upload_entry = tb.Entry(self.assembly_upload_frame, textvariable=self.assembly_upload_var,
+        self.assembly_upload_entry = tb.Entry(self.assembly_attachment_frame, textvariable=self.assembly_upload_var,
                                               width=30, state="readonly")
-        self.assembly_upload_entry.grid(row=0, column=0, padx=5)
-        self.assembly_browse_button = tb.Button(self.assembly_upload_frame, text="Browse File",
+        self.assembly_browse_button = tb.Button(self.assembly_attachment_frame, text="Browse File",
                                                 command=self.browse_assembly_file, bootstyle="primary")
-        self.assembly_browse_button.grid(row=0, column=1, padx=5)
-        self.assembly_upload_button = tb.Button(self.assembly_upload_frame, text="Upload File",
+        self.assembly_upload_button = tb.Button(self.assembly_attachment_frame, text="Upload File",
                                                 command=self.upload_assembly_attachment, bootstyle="primary")
-        self.assembly_upload_button.grid(row=0, column=2, padx=5)
+        self.assembly_browse_button.grid(row=4, column=0, sticky="w", padx=(0, 5), pady=(8, 0))
+        self.assembly_upload_entry.grid(row=4, column=0, sticky="e", padx=(0, 120), pady=(8, 0))
+        self.assembly_upload_button.grid(row=4, column=0, sticky="e", padx=(0, 5), pady=(8, 0))
 
         # Package Properties tab
         self.properties_frame = tb.Frame(self.notebook)
@@ -391,139 +397,51 @@ class StratusGUI:
             "modelName", "reference", "referenceName", "action", "actionName", "name", "value", "trackingStatusName", 
             "trackingStatusColor", "stationName"
         ]
-        self.activity_table = tb.Treeview(
+        self.activity_table = self.create_table_with_scrollbars(
             self.activity_frame,
             columns=activity_columns,
-            show="headings",
-            bootstyle="dark"
+            column_widths=[150] * len(activity_columns)
         )
-        for col in activity_columns:
-            display_name = ' '.join(word.capitalize() for word in col.split('_'))
-            self.activity_table.heading(col, text=display_name)
-            self.activity_table.column(col, width=100, anchor="w")
-        self.activity_table.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
-        # Vertical scrollbar
-        v_scrollbar = tb.Scrollbar(
-            self.activity_frame,
-            orient="vertical",
-            command=self.activity_table.yview,
-            bootstyle="dark"
-        )
-        v_scrollbar.grid(row=0, column=1, sticky="ns")
-        self.activity_table.configure(yscrollcommand=v_scrollbar.set)
-        # Horizontal scrollbar
-        h_scrollbar = tb.Scrollbar(
-            self.activity_frame,
-            orient="horizontal",
-            command=self.activity_table.xview,
-            bootstyle="dark"
-        )
-        h_scrollbar.grid(row=1, column=0, sticky="ew")
-        self.activity_table.configure(xscrollcommand=h_scrollbar.set)
-        self.activity_frame.columnconfigure(0, weight=1)
-        self.activity_frame.rowconfigure(0, weight=1)
-        
-                # Set column headings and widths
-        for col in activity_columns:
-            display_name = ' '.join(word.capitalize() for word in col.split('_'))
-            self.activity_table.heading(col, text=display_name)
-            self.activity_table.column(col, width=150, anchor="w")
-        self.activity_table.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
-        scrollbar = tb.Scrollbar(
-        self.activity_frame,
-        orient="vertical",
-        command=self.activity_table.yview,
-        bootstyle="dark"
-        )
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        self.activity_table.configure(yscrollcommand=scrollbar.set)
-        self.activity_frame.columnconfigure(0, weight=1)
-        self.activity_frame.rowconfigure(0, weight=1)
         
         # Users tab
         self.users_frame = tb.Frame(self.notebook)
         self.notebook.add(self.users_frame, text="Users")
-        self.users_table = tb.Treeview(self.users_frame,
-                                       columns=("firstName", "lastName", "email", "status"),
-                                       show="headings", bootstyle="dark")
-        self.users_table.heading("firstName", text="First Name")
-        self.users_table.heading("lastName", text="Last Name")
-        self.users_table.heading("email", text="Email")
-        self.users_table.heading("status", text="Status")
-        self.users_table.column("firstName", width=150)
-        self.users_table.column("lastName", width=150)
-        self.users_table.column("email", width=200)
-        self.users_table.column("status", width=100)
-        self.users_table.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
-        scrollbar = tb.Scrollbar(self.users_frame, orient="vertical",
-                                 command=self.users_table.yview, bootstyle="dark")
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        self.users_table.configure(yscrollcommand=scrollbar.set)
-        self.users_frame.columnconfigure(0, weight=1)
-        self.users_frame.rowconfigure(0, weight=1)
+        params = {"include": "id,firstName,lastName,email,status", "pagesize": PAGE_SIZE, "disabletotal": True}
+        response = make_api_request(f"{BASE_URL}{ENDPOINTS['user']}", self.headers, params, "Fetch users")
+        self.users_table = self.create_table_with_scrollbars(
+            self.users_frame,
+            columns=("firstName", "lastName", "email", "status"),
+            column_widths=[150, 150, 200, 100]
+        )
 
         # Containers tab
         self.containers_frame = tb.Frame(self.notebook)
         self.notebook.add(self.containers_frame, text="Containers")
-        self.containers_table = tb.Treeview(self.containers_frame,
-                                           columns=("name", "description"),
-                                           show="headings", bootstyle="dark")
-        self.containers_table.heading("name", text="Name")
-        self.containers_table.heading("description", text="Description")
-        self.containers_table.column("name", width=150)
-        self.containers_table.column("description", width=300)
-        self.containers_table.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
-        scrollbar = tb.Scrollbar(self.containers_frame, orient="vertical",
-                                 command=self.containers_table.yview, bootstyle="dark")
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        self.containers_table.configure(yscrollcommand=scrollbar.set)
-        self.containers_frame.columnconfigure(0, weight=1)
-        self.containers_frame.rowconfigure(0, weight=1)
+        self.containers_table = self.create_table_with_scrollbars(
+            self.containers_frame,
+            columns=("name", "description"),
+            column_widths=[150, 300]
+        )
         
-                # Tracking Statuses tab
+        # Tracking Statuses tab
         self.tracking_statuses_frame = tb.Frame(self.notebook)
         self.notebook.add(self.tracking_statuses_frame, text="Tracking Statuses")
-        self.tracking_statuses_table = tb.Treeview(self.tracking_statuses_frame,
-                                                 columns=("name", "description", "color", "sequenceNumber", "canAddToAssembly"),
-                                                 show="headings", bootstyle="dark")
-        self.tracking_statuses_table.heading("name", text="Name")
-        self.tracking_statuses_table.heading("description", text="Description")
-        self.tracking_statuses_table.heading("color", text="Color")
-        self.tracking_statuses_table.heading("sequenceNumber", text="Sequence Number")
-        self.tracking_statuses_table.heading("canAddToAssembly", text="Can Add to Assembly")
-        self.tracking_statuses_table.column("name", width=150)
-        self.tracking_statuses_table.column("description", width=200)
-        self.tracking_statuses_table.column("color", width=100)
-        self.tracking_statuses_table.column("sequenceNumber", width=100)
-        self.tracking_statuses_table.column("canAddToAssembly", width=120)
-        self.tracking_statuses_table.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
-        scrollbar = tb.Scrollbar(self.tracking_statuses_frame, orient="vertical",
-                                 command=self.tracking_statuses_table.yview, bootstyle="dark")
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        self.tracking_statuses_table.configure(yscrollcommand=scrollbar.set)
-        self.tracking_statuses_frame.columnconfigure(0, weight=1)
-        self.tracking_statuses_frame.rowconfigure(0, weight=1)
+        self.tracking_statuses_table = self.create_table_with_scrollbars(
+            self.tracking_statuses_frame,
+            columns=("name", "description", "color", "sequenceNumber", "canAddToAssembly"),
+            column_widths=[150, 200, 100, 100, 120]
+        )
 
         # API Health tab
         self.health_frame = tb.Frame(self.notebook)
         self.notebook.add(self.health_frame, text="API Health")
-        self.health_table = tb.Treeview(self.health_frame,
-                                        columns=("key", "value"),
-                                        show="headings", bootstyle="dark")
-        self.health_table.heading("key", text="Key")
-        self.health_table.heading("value", text="Value")
-        self.health_table.column("key", width=200)
-        self.health_table.column("value", width=300)
-        self.health_table.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
-        scrollbar = tb.Scrollbar(self.health_frame, orient="vertical",
-                                 command=self.health_table.yview, bootstyle="dark")
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        self.health_table.configure(yscrollcommand=scrollbar.set)
-        self.health_frame.columnconfigure(0, weight=1)
-        self.health_frame.rowconfigure(0, weight=1)
+        self.health_table = self.create_table_with_scrollbars(
+            self.health_frame,
+            columns=("key", "value"),
+            column_widths=[200, 300]
+        )
 
         # Fetch initial data
-        self.fetch_projects()
         self.tab_data_fetched = {
             "activity_logs": False,
             "users": False,
@@ -541,6 +459,73 @@ class StratusGUI:
 #------------------------------------------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------------------------------------------
+
+    def create_table_with_scrollbars(self, parent, columns, column_widths, heading_map=None):
+        table = tb.Treeview(parent, columns=columns, show="headings", bootstyle="dark")
+        for i, col in enumerate(columns):
+            heading = heading_map[col] if heading_map and col in heading_map else col.replace("_", " ").title()
+            table.heading(col, text=heading)
+            table.column(col, width=column_widths[i] if i < len(column_widths) else 100, anchor="w", stretch=False)
+        # No extra padding so scrollbars touch the table
+        table.grid(row=0, column=0, sticky="nsew")
+
+        # Vertical scrollbar
+        v_scrollbar = tb.Scrollbar(parent, orient="vertical", command=table.yview, bootstyle="dark")
+        v_scrollbar.grid(row=0, column=1, sticky="ns")
+        table.configure(yscrollcommand=v_scrollbar.set)
+
+        # Horizontal scrollbar
+        h_scrollbar = tb.Scrollbar(parent, orient="horizontal", command=table.xview, bootstyle="dark")
+        h_scrollbar.grid(row=1, column=0, sticky="ew")
+        table.configure(xscrollcommand=h_scrollbar.set)
+
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(0, weight=1)
+
+        # Bind double-click on header separator for auto-size
+        table.bind('<Button-1>', lambda e, t=table: self._treeview_separator_click(e, t), add="+")
+        table.bind('<Double-Button-1>', lambda e, t=table: self._treeview_separator_double_click(e, t), add="+")
+
+        return table
+
+    def _treeview_separator_click(self, event, tree):
+        # Store the column being resized (Tkinter doesn't provide this directly, so we use identify_region/column)
+        region = tree.identify_region(event.x, event.y)
+        if region == "separator":
+            tree._resizing_column = tree.identify_column(event.x)
+        else:
+            tree._resizing_column = None
+
+    def _treeview_separator_double_click(self, event, tree):
+        # Only auto-size if double-clicked on a separator
+        region = tree.identify_region(event.x, event.y)
+        if region != "separator":
+            return
+        col = tree.identify_column(event.x)
+        if not col:
+            return
+        col_id = tree["columns"][int(col[1:]) - 1]  # col is like '#1', '#2', etc.
+
+        # Get font used in the treeview
+        style = tree.cget("style") or "Treeview"
+        font_name = tree.tk.call("ttk::style", "lookup", style, "font")
+        if not font_name:
+            font_name = "TkDefaultFont"
+        font = tkfont.nametofont(font_name)
+
+        # Calculate max width: header and all cell values
+        header = tree.heading(col_id)["text"]
+        max_width = font.measure(str(header))
+        for item in tree.get_children():
+            value = tree.set(item, col_id)
+            max_width = max(max_width, font.measure(str(value)))
+        # Add some padding
+        max_width += 20
+        tree.column(col_id, width=max_width)
+
+    def clear_table(self, table):
+        for item in table.get_children():
+            table.delete(item)
 
     def on_tab_changed(self, event):
         """Fetch data for new tabs when selected."""
@@ -583,7 +568,16 @@ class StratusGUI:
             filter_text = ""
         self.filter_items(item_type, filter_text)
 
-    def filter_items(self, item_type, filter_text=""):
+    def add_placeholder(self, entry, placeholder):
+        entry.insert(0, placeholder)
+        entry.configure(foreground="gray", font=("Arial", 10, ""))
+        entry.bind("<FocusIn>", lambda e: self._clear_placeholder(e, placeholder))
+        entry.bind("<FocusOut>", lambda e: self._restore_placeholder(e, placeholder))
+        entry.bind("<KeyRelease>", lambda e: self._on_filter_keyrelease(e, entry._item_type))
+        entry.bind("<Button-1>", lambda e: entry.focus_set())
+        entry._item_type = placeholder.split()[1].lower()  # e.g., "projects", "packages", "assemblies"
+
+    def filter_items(self, item_type: str, filter_text: str = "") -> None:
         source = (self.all_projects if item_type == "projects" else
                   self.all_packages if item_type == "packages" else self.all_assemblies)
         filtered = source if not filter_text else [
@@ -636,8 +630,7 @@ class StratusGUI:
         items = self.packages if item_type == "packages" else self.assemblies
         attachment_table = self.package_attachment_table if item_type == "packages" else self.assembly_attachment_table
         no_attachments_label = self.package_no_attachments_label if item_type == "packages" else self.assembly_no_attachments_label
-        for item in table.get_children():
-            table.delete(item)
+        self.clear_table(table)
         if item_type == "packages":
             for item in items:
                 table.insert("", "end", values=(item.get("name", ""), item.get("description", ""), item.get("assembly_count", 0)),
@@ -647,8 +640,7 @@ class StratusGUI:
                 table.insert("", "end", values=(item.get("name", ""), item.get("description", "")),
                              tags=(item.get("id", ""),))
         if not items:
-            for item in attachment_table.get_children():
-                attachment_table.delete(item)
+            self.clear_table(attachment_table)
             no_attachments_label.place_forget()
             if item_type == "packages":
                 for var in self.property_fields.values():
@@ -657,18 +649,20 @@ class StratusGUI:
 
     def clear_tables_and_fields(self):
         for table in [self.package_table, self.package_attachment_table, self.assembly_table, self.assembly_attachment_table]:
-            for item in table.get_children():
-                table.delete(item)
+            self.clear_table(table)
         for var in self.property_fields.values():
             var.set("")
         self.unsaved_alert.grid_remove()
         self.package_no_attachments_label.place_forget()
         self.assembly_no_attachments_label.place_forget()
 
-    def fetch_projects(self):
-        params = {"include": "id,name", "pagesize": 1000, "disabletotal": True}
+    def fetch_projects(self) -> None:
+        """Fetch the list of projects from the API and update the dropdown."""
+        self.root.config(cursor="wait")
+        self.root.update()
         try:
-            response = make_api_request(f"{BASE_URL}{PROJECT_ENDPOINT}", HEADERS, params, "Fetch projects")
+            params = {"include": "id,name", "pagesize": PAGE_SIZE, "disabletotal": True}
+            response = make_api_request(f"{BASE_URL}{ENDPOINTS['project']}", self.headers, params, "Fetch projects")
             self.all_projects = response.json().get("data", [])
             if not self.all_projects:
                 messagebox.showwarning("No Projects", "No projects found.")
@@ -680,18 +674,21 @@ class StratusGUI:
             self.project_dropdown.current(0)
         except RequestException:
             self.project_dropdown.configure(state="disabled")
+        finally:
+            self.root.config(cursor="")
+            self.root.update()
 
     def fetch_packages(self, event):
-        selected_index = self.project_dropdown.current()
-        if selected_index <= 0 or not self.projects:
+        project_index = self.project_dropdown.current()
+        if project_index > 0 and project_index - 1 < len(self.projects):
+            project_id = self.projects[project_index - 1].get("id")
+            if not project_id:
+                messagebox.showerror("Error", "Selected project has no ID.")
+                return
+            self.fetch_packages_by_id(project_id)
+        else:
             self.clear_tables_and_fields()
             self.selected_package_id = None
-            return
-        project_id = self.projects[selected_index - 1].get("id")
-        if not project_id:
-            messagebox.showerror("Error", "Selected project has no ID.")
-            return
-        self.fetch_packages_by_id(project_id)
 
     def fetch_packages_by_id(self, project_id):
         self.clear_tables_and_fields()
@@ -702,25 +699,12 @@ class StratusGUI:
                         "officeStartDT,purchasingStartDT,requiredDT,startDT,status"),
             "where": f"projectId eq '{project_id}'",
             "page": 0,
-            "pagesize": 1000,
+            "pagesize": PAGE_SIZE,
             "disabletotal": True
         }
-        self.all_packages = []
-        page = 0
-        while True:
-            params["page"] = page
-            try:
-                response = make_api_request(f"{BASE_URL}{PACKAGE_ENDPOINT}", HEADERS, params, "Fetch packages")
-                data = response.json()
-                packages = data.get("data", [])
-                for pkg in packages:
-                    pkg["assembly_count"] = self.get_assembly_count(pkg.get("id"))
-                self.all_packages.extend(packages)
-                if not packages or len(packages) < params["pagesize"] or data.get("truncatedResults", False):
-                    break
-                page += 1
-            except RequestException:
-                return
+        self.all_packages = list(self.paginated_api_fetch(f"{BASE_URL}{ENDPOINTS['package']}", params, "Fetch packages"))
+        for pkg in self.all_packages:
+            pkg["assembly_count"] = self.get_assembly_count(pkg.get("id"))
         self.packages = self.all_packages
         self.update_table("packages")
         if not self.packages:
@@ -729,22 +713,10 @@ class StratusGUI:
     def get_assembly_count(self, package_id):
         if not package_id:
             return 0
-        params = {"include": "id", "page": 0, "pagesize": 1000, "disabletotal": True}
+        params = {"include": "id", "page": 0, "pagesize": PAGE_SIZE, "disabletotal": True}
         total_count = 0
-        page = 0
-        while True:
-            params["page"] = page
-            try:
-                response = make_api_request(f"{BASE_URL}/v2/package/{package_id}/assemblies",
-                                            HEADERS, params, f"Fetch assembly count for package {package_id}")
-                data = response.json()
-                assemblies = data.get("data", [])
-                total_count += len(assemblies)
-                if not assemblies or len(assemblies) < params["pagesize"] or data.get("truncatedResults", False):
-                    break
-                page += 1
-            except RequestException:
-                return 0
+        for _ in self.paginated_api_fetch(f"{BASE_URL}/v2/package/{package_id}/assemblies", params, f"Fetch assembly count for package {package_id}"):
+            total_count += 1
         return total_count
 
     def fetch_activity_logs(self):
@@ -756,15 +728,14 @@ class StratusGUI:
                 "modelName,reference,referenceName,action,actionName,name,value,"
                 "trackingStatusName,trackingStatusColor,stationName"
             ),
-            "pagesize": 1000,
+            "pagesize": PAGE_SIZE,
             "disabletotal": True,
             "where": "createdDT ge DateTime.Now.AddDays(-30)"
         }
         try:
-            response = make_api_request(f"{BASE_URL}/v1/activity", HEADERS, params, "Fetch activity logs")
+            response = make_api_request(f"{BASE_URL}{ENDPOINTS['activity']}", self.headers, params, "Fetch activity logs")
             self.activity_logs = response.json().get("data", [])
-            for item in self.activity_table.get_children():
-                self.activity_table.delete(item)
+            self.clear_table(self.activity_table)
             for log in self.activity_logs:
                 created_dt = log.get("createdDT", "")
                 if created_dt:
@@ -801,12 +772,11 @@ class StratusGUI:
             messagebox.showerror("Error", f"Failed to fetch activity logs: {e}")
         
     def fetch_users(self):
-        params = {"include": "id,firstName,lastName,email,status", "pagesize": 1000, "disabletotal": True}
+        params = {"include": "id,firstName,lastName,email,status", "pagesize": PAGE_SIZE, "disabletotal": True}
         try:
-            response = make_api_request(f"{BASE_URL}/v2/user", HEADERS, params, "Fetch users")
+            response = make_api_request(f"{BASE_URL}{ENDPOINTS['user']}", self.headers, params, "Fetch users")
             self.users = response.json().get("data", [])
-            for item in self.users_table.get_children():
-                self.users_table.delete(item)
+            self.clear_table(self.users_table)
             for user in self.users:
                 status = "Active" if user.get("status") == 1 else "Disabled"
                 self.users_table.insert("", "end",
@@ -816,16 +786,16 @@ class StratusGUI:
                                                 status))
             if not self.users:
                 messagebox.showinfo("No Users", "No users found.")
-        except RequestException:
-            pass
+        except RequestException as e:
+            logging.error(f"Error fetching users: {e}")
+            messagebox.showerror("Error", f"Failed to fetch users: {e}")
 
     def fetch_containers(self):
-        params = {"include": "id,name,description", "pagesize": 1000, "disabletotal": True}
+        params = {"include": "id,name,description", "pagesize": PAGE_SIZE, "disabletotal": True}
         try:
-            response = make_api_request(f"{BASE_URL}/v1/container", HEADERS, params, "Fetch containers")
+            response = make_api_request(f"{BASE_URL}/v1/container", self.headers, params, "Fetch containers")
             self.containers = response.json().get("data", [])
-            for item in self.containers_table.get_children():
-                self.containers_table.delete(item)
+            self.clear_table(self.containers_table)
             for container in self.containers:
                 self.containers_table.insert("", "end",
                                              values=(container.get("name", ""),
@@ -838,12 +808,11 @@ class StratusGUI:
     def fetch_health(self):
         """Fetch API health data from the /health endpoint."""
         try:
-            response = make_api_request(f"{BASE_URL}/health", HEADERS, {}, "Fetch API health")
+            response = make_api_request(f"{BASE_URL}/health", self.headers, {}, "Fetch API health")
             data = response.json()
 
             # Clear existing table data
-            for item in self.health_table.get_children():
-                self.health_table.delete(item)
+            self.clear_table(self.health_table)
 
             # Handle different response types
             if isinstance(data, dict):
@@ -875,31 +844,28 @@ class StratusGUI:
                 messagebox.showinfo("No Health Data", "No health data found.")
 
         except RequestException:
-            for item in self.health_table.get_children():
-                self.health_table.delete(item)
+            self.clear_table(self.health_table)
             self.health_data = []
             messagebox.showerror("Error", "Failed to fetch API health data.")
             
     def fetch_tracking_statuses(self):
         """Fetch tracking statuses data from the /v1/company/tracking-statuses endpoint."""
         params = {"include": "id,name,description,color,sequenceNumber,canAddToAssembly", 
-                  "pagesize": 1000, "disabletotal": True}
+                  "pagesize": PAGE_SIZE, "disabletotal": True}          
+
         try:
             response = make_api_request(f"{BASE_URL}/v1/company/tracking-statuses", 
-                                      HEADERS, params, "Fetch tracking statuses")
-            # Debug: Print raw response to inspect data
+                                      self.headers, params, "Fetch tracking statuses")
+            # Debug: Log raw response to inspect data
             data = response.json()
-            print("Tracking Statuses Response:", data)  # Debug output
+            logging.debug(f"Tracking Statuses Response: {data}")
             # Handle case where response is a list directly
             if isinstance(data, list):
                 self.tracking_statuses = data
             else:
                 self.tracking_statuses = data.get("data", []) if isinstance(data, dict) else []
-            for item in self.tracking_statuses_table.get_children():
-                self.tracking_statuses_table.delete(item)
+            self.clear_table(self.tracking_statuses_table)
             for status in self.tracking_statuses:
-                # Debug: Print each status object to inspect fields
-                print("Processing Status:", status)
                 self.tracking_statuses_table.insert("", "end",
                                                   values=(status.get("name", "N/A"),
                                                           status.get("description", "N/A"),
@@ -909,8 +875,7 @@ class StratusGUI:
             if not self.tracking_statuses:
                 messagebox.showinfo("No Tracking Statuses", "No tracking statuses found.")
         except RequestException as e:
-            for item in self.tracking_statuses_table.get_children():
-                self.tracking_statuses_table.delete(item)
+            self.clear_table(self.tracking_statuses_table)
             self.tracking_statuses = []
             messagebox.showerror("Error", f"Failed to fetch tracking statuses data: {e}")
             
@@ -942,17 +907,15 @@ class StratusGUI:
 
     def fetch_package_attachments(self):
         if not self.selected_package_id:
-            for item in self.package_attachment_table.get_children():
-                self.package_attachment_table.delete(item)
+            self.clear_table(self.package_attachment_table)
             self.package_no_attachments_label.place_forget()
             return
-        params = {"include": "id,fileName,createdDT", "page": 0, "pagesize": 1000, "disabletotal": True}
+        params = {"include": "id,fileName,createdDT", "page": 0, "pagesize": PAGE_SIZE, "disabletotal": True}
         try:
             response = make_api_request(f"{BASE_URL}/v1/package/{self.selected_package_id}/attachments",
-                                        HEADERS, params, "Fetch package attachments")
+                                        self.headers, params, "Fetch package attachments")
             self.package_attachments = response.json().get("data", [])
-            for item in self.package_attachment_table.get_children():
-                self.package_attachment_table.delete(item)
+            self.clear_table(self.package_attachment_table)
             for att in self.package_attachments:
                 created_dt = att.get("createdDT", "")
                 if created_dt:
@@ -964,39 +927,17 @@ class StratusGUI:
                                                      tags=(att.get("id", ""),))
             self.package_no_attachments_label.place(relx=0.5, rely=0.5, anchor="center") if not self.package_attachments else self.package_no_attachments_label.place_forget()
         except RequestException:
-            for item in self.package_attachment_table.get_children():
-                self.package_attachment_table.delete(item)
+            self.clear_table(self.package_attachment_table)
             self.package_no_attachments_label.place_forget()
 
     def fetch_assemblies(self):
         if not self.selected_package_id:
-            for item in self.assembly_table.get_children():
-                self.assembly_table.delete(item)
-            for item in self.assembly_attachment_table.get_children():
-                self.assembly_attachment_table.delete(item)
+            self.clear_table(self.assembly_table)
+            self.clear_table(self.assembly_attachment_table)
             self.assembly_no_attachments_label.place_forget()
             return
-        params = {"include": "id,name,description", "page": 0, "pagesize": 1000, "disabletotal": True}
-        self.all_assemblies = []
-        page = 0
-        while True:
-            params["page"] = page
-            try:
-                response = make_api_request(f"{BASE_URL}/v2/package/{self.selected_package_id}/assemblies",
-                                            HEADERS, params, "Fetch assemblies")
-                data = response.json()
-                assemblies = data.get("data", [])
-                self.all_assemblies.extend(assemblies)
-                if not assemblies or len(assemblies) < params["pagesize"] or data.get("truncatedResults", False):
-                    break
-                page += 1
-            except RequestException:
-                for item in self.assembly_table.get_children():
-                    self.assembly_table.delete(item)
-                for item in self.assembly_attachment_table.get_children():
-                    self.assembly_attachment_table.delete(item)
-                self.assembly_no_attachments_label.place_forget()
-                return
+        params = {"include": "id,name,description", "page": 0, "pagesize": PAGE_SIZE, "disabletotal": True}
+        self.all_assemblies = list(self.paginated_api_fetch(f"{BASE_URL}/v2/package/{self.selected_package_id}/assemblies", params, "Fetch assemblies"))
         self.assemblies = self.all_assemblies
         self.update_table("assemblies")
         if not self.assemblies:
@@ -1006,19 +947,17 @@ class StratusGUI:
         """Fetch attachments for the selected assembly."""
         selected = self.assembly_table.selection()
         if not selected:
-            for item in self.assembly_attachment_table.get_children():
-                self.assembly_attachment_table.delete(item)
+            self.clear_table(self.assembly_attachment_table)
             self.selected_assembly_id = None
             self.assembly_no_attachments_label.place_forget()
             return
         self.selected_assembly_id = self.assembly_table.item(selected[0])["tags"][0]
-        params = {"include": "id,fileName,createdDT", "page": 0, "pagesize": 1000, "disabletotal": True}
+        params = {"include": "id,fileName,createdDT", "page": 0, "pagesize": PAGE_SIZE, "disabletotal": True}
         try:
             response = make_api_request(f"{BASE_URL}/v1/assembly/{self.selected_assembly_id}/attachments",
-                                        HEADERS, params, "Fetch assembly attachments")
+                                        self.headers, params, "Fetch assembly attachments")
             self.assembly_attachments = response.json().get("data", [])
-            for item in self.assembly_attachment_table.get_children():
-                self.assembly_attachment_table.delete(item)
+            self.clear_table(self.assembly_attachment_table)
             for att in self.assembly_attachments:
                 created_dt = att.get("createdDT", "")
                 if created_dt:
@@ -1030,8 +969,7 @@ class StratusGUI:
                                                       tags=(att.get("id", ""),))
             self.assembly_no_attachments_label.place(relx=0.5, rely=0.5, anchor="center") if not self.assembly_attachments else self.assembly_no_attachments_label.place_forget()
         except RequestException:
-            for item in self.assembly_attachment_table.get_children():
-                self.assembly_attachment_table.delete(item)
+            self.clear_table(self.assembly_attachment_table)
             self.assembly_no_attachments_label.place_forget()
 
     def check_property_changes(self, event=None):
@@ -1040,7 +978,7 @@ class StratusGUI:
 
     def apply_property_changes(self):
         if not self.selected_package_id:
-            messagebox.showwarning("No Package Selected", "Please select a package to apply changes.")
+            messagebox.showwarning(NO_PACKAGE_SELECTED, "Please select a package to apply changes.")
             return
         package_patch_data = {"id": self.selected_package_id}
         package_changed = False
@@ -1078,7 +1016,7 @@ class StratusGUI:
             messagebox.showinfo("No Changes", "No changes to apply.")
             return
         try:
-            response = requests.patch(f"{BASE_URL}/v2/package/properties", headers=HEADERS,
+            response = requests.patch(f"{BASE_URL}/v2/package/properties", headers=self.headers,
                                      json=package_patch_data, timeout=10)
             response.raise_for_status()
             for key, value in package_patch_data.items():
@@ -1149,13 +1087,14 @@ class StratusGUI:
 
     def download_attachment(self, att_id, file_name, save_dir):
         try:
-            response = make_api_request(f"{BASE_URL}/v1/attachment/{att_id}/download",
-                                       HEADERS, {}, f"Download attachment {file_name}", stream=True)
-            save_path = os.path.join(save_dir, file_name)
-            with open(save_path, "wb") as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
+            with requests.get(f"{BASE_URL}/v1/attachment/{att_id}/download",
+                              headers=self.headers, stream=True, timeout=10) as response:
+                response.raise_for_status()
+                save_path = os.path.join(save_dir, file_name)
+                with open(save_path, "wb") as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
         except (RequestException, OSError) as e:
             messagebox.showerror("Error", f"Failed to download/save attachment {file_name}: {e}")
 
@@ -1169,47 +1108,37 @@ class StratusGUI:
         if file_path:
             self.assembly_upload_var.set(file_path)
 
-    def upload_package_attachment(self):
-        if not self.selected_package_id:
-            messagebox.showwarning("No Package Selected", "Please select a package to upload an attachment.")
-            return
-        file_path = self.package_upload_var.get()
+    def upload_attachment(self, endpoint: str, file_var: StringVar, refresh_callback: callable) -> None:
+        file_path = file_var.get()
         if not file_path or not os.path.exists(file_path):
-            messagebox.showwarning("No File Selected", "Please select a valid file to upload.")
+            messagebox.showwarning(NO_FILE_SELECTED, "Please select a valid file to upload.")
             return
         try:
             with open(file_path, "rb") as f:
                 files = {"file": (os.path.basename(file_path), f)}
-                response = requests.post(f"{BASE_URL}/v1/package/{self.selected_package_id}/attachment",
-                                        headers=HEADERS, files=files, timeout=10)
+                response = requests.post(endpoint, headers=self.headers, files=files, timeout=10)
                 response.raise_for_status()
                 messagebox.showinfo("Success", f"Successfully uploaded {os.path.basename(file_path)}")
-                self.package_upload_var.set("")
-                self.fetch_package_attachments()
+                file_var.set("")
+                refresh_callback()
         except (RequestException, OSError) as e:
-            messagebox.showerror("Error", f"Failed to upload package attachment: {e}")
+            messagebox.showerror("Error", f"Failed to upload attachment: {e}")
+
+    def upload_package_attachment(self):
+        if not self.selected_package_id:
+            messagebox.showwarning(NO_PACKAGE_SELECTED, "Please select a package to upload an attachment.")
+            return
+        endpoint = f"{BASE_URL}/v1/package/{self.selected_package_id}/attachment"
+        self.upload_attachment(endpoint, self.package_upload_var, self.fetch_package_attachments)
 
     def upload_assembly_attachment(self):
         selected = self.assembly_table.selection()
         if not selected:
-            messagebox.showwarning("No Assembly Selected", "Please select an assembly to upload an attachment.")
+            messagebox.showwarning(NO_ASSEMBLY_SELECTED, "Please select an assembly to upload an attachment.")
             return
         assembly_id = self.assembly_table.item(selected[0])["tags"][0]
-        file_path = self.assembly_upload_var.get()
-        if not file_path or not os.path.exists(file_path):
-            messagebox.showwarning("No File Selected", "Please select a valid file to upload.")
-            return
-        try:
-            with open(file_path, "rb") as f:
-                files = {"file": (os.path.basename(file_path), f)}
-                response = requests.post(f"{BASE_URL}/v1/assembly/{assembly_id}/attachment",
-                                        headers=HEADERS, files=files, timeout=10)
-                response.raise_for_status()
-                messagebox.showinfo("Success", f"Successfully uploaded {os.path.basename(file_path)}")
-                self.assembly_upload_var.set("")
-                self.fetch_assembly_attachments(None)
-        except (RequestException, OSError) as e:
-            messagebox.showerror("Error", f"Failed to upload assembly attachment: {e}")
+        endpoint = f"{BASE_URL}/v1/assembly/{assembly_id}/attachment"
+        self.upload_attachment(endpoint, self.assembly_upload_var, lambda: self.fetch_assembly_attachments(None))
 
     def refresh_tables(self):
         project_index = self.project_dropdown.current()
@@ -1255,16 +1184,29 @@ class StratusGUI:
         self.fetch_tracking_statuses()
         self.notebook.select(current_tab)
 
+    def paginated_api_fetch(self, url: str, params: dict, action: str):
+        page = 0
+        while True:
+            params["page"] = page
+            try:
+                response = make_api_request(url, self.headers, params, action)
+                data = response.json()
+                items = data.get("data", [])
+                yield from items
+                if not items or len(items) < params["pagesize"] or data.get("truncatedResults", False):
+                    break
+                page += 1
+            except RequestException:
+                break
+
 if __name__ == "__main__":
     root = tb.Window(themename="darkly")
-    window_width = 1980
-    window_height = 1000
+    window_width = 1700
+    window_height = 680
     screen_width = root.winfo_screenwidth()
     screen_height = root.winfo_screenheight()
     x = (screen_width - window_width) // 2
     y = (screen_height - window_height) // 2
     root.geometry(f"{window_width}x{window_height}+{x}+{y}")
-    APP_KEY = get_api_key(root)
-    HEADERS = {"app-key": APP_KEY, "Accept": "application/json"}
     app = StratusGUI(root)
     root.mainloop()
