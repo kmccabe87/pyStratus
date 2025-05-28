@@ -174,6 +174,8 @@ class StratusGUI:
     def setup_left_frame(self):
         self.left_frame = tb.Frame(self.main_frame)
         self.left_frame.grid(row=0, column=0, sticky="ns", padx=5)
+        # Do NOT set self.main_frame.columnconfigure(0, weight=1) for the left frame!
+        self.main_frame.columnconfigure(0, weight=0)  # Fixed width
 
         # Project dropdown and filter
         self.project_label = tb.Label(self.left_frame, text="Select Project:")
@@ -217,8 +219,11 @@ class StratusGUI:
                 self.app_image_ref = app_image
         except Exception as e:
             messagebox.showerror("Error", f"Failed to load logo: {e}")
-        self.app_logo = tb.Label(self.left_frame, image=self.app_photo or "Logo Unavailable")
-        self.app_logo.grid(row=14, column=0, columnspan=2, padx=10, pady=10, sticky="sw")
+        if self.app_photo:
+            self.app_logo = tb.Label(self.left_frame, image=self.app_photo)
+        else:
+            self.app_logo = tb.Label(self.left_frame, text="Logo Unavailable", font=("Arial", 16, "bold"), foreground="red")
+        self.app_logo.grid(row=13, column=0, columnspan=2, padx=10, pady=10, sticky="sw")
         self.left_frame.rowconfigure(14, weight=1)
 
     def setup_notebook(self):
@@ -231,6 +236,10 @@ class StratusGUI:
         # Attachments tab
         self.attachments_frame = tb.Frame(self.notebook)
         self.notebook.add(self.attachments_frame, text="Attachments")
+        self.attachments_frame.columnconfigure(0, weight=1)  # Package side (optional, if you want both sides to expand)
+        self.attachments_frame.columnconfigure(1, weight=1)  # Assembly side (right)
+        self.attachments_frame.rowconfigure(0, weight=1)
+        self.attachments_frame.rowconfigure(1, weight=1)
 
         # Packages table
         self.package_frame = tb.Frame(self.attachments_frame)
@@ -238,9 +247,11 @@ class StratusGUI:
         self.package_table = self.create_table_with_scrollbars(
             self.package_frame,
             columns=("name", "assembly_count", "description"),
-            column_widths=[150, 100, 200],
-            heading_map={"name": "Name", "assembly_count": "Assembly Count", "description": "Description"}
+            column_widths=[350, 250, 400],
+            heading_map={"name": "Name", "assembly_count": "Assembly Count", "description": "Description"},
+            height=18  # <-- Set your desired number of rows here
         )
+
         self.package_table.bind("<<TreeviewSelect>>", self.on_package_select)
         self.package_frame.columnconfigure(0, weight=1)
         self.package_frame.rowconfigure(0, weight=1)
@@ -262,33 +273,42 @@ class StratusGUI:
         self.package_attachment_frame.columnconfigure(0, weight=1)
         self.package_attachment_frame.rowconfigure(0, weight=1)
 
-        # Download Selected button (row 2)
+        # Controls sub-frame (row 1)
+        self.package_attachment_controls_frame = tb.Frame(self.package_attachment_frame)
+        self.package_attachment_controls_frame.grid(row=1, column=0, sticky="ew", padx=0, pady=(8, 0))
+        self.package_attachment_controls_frame.columnconfigure(0, weight=1)
+        self.package_attachment_controls_frame.columnconfigure(1, weight=0)
+        self.package_attachment_controls_frame.columnconfigure(2, weight=0)
+        self.package_attachment_controls_frame.columnconfigure(3, weight=0)
+        self.package_attachment_controls_frame.columnconfigure(4, weight=0)
+
+        # Download Selected button
         self.package_download_selected_button = tb.Button(
-            self.package_attachment_frame, text="Download Selected",
+            self.package_attachment_controls_frame, text="Download Selected",
             command=self.download_selected_package_attachments,
-            width=20, bootstyle="primary"
+            width=18, bootstyle="primary"
         )
-        self.package_download_selected_button.grid(row=2, column=0, sticky="e", padx=5, pady=(8, 0))
+        self.package_download_selected_button.grid(row=0, column=0, sticky="ew", padx=(0, 5))
 
-        # Download All button (row 3)
+        # Download All button
         self.package_download_all_button = tb.Button(
-            self.package_attachment_frame, text="Download All",
+            self.package_attachment_controls_frame, text="Download All",
             command=self.download_all_package_attachments,
-            width=20, bootstyle="primary"
+            width=14, bootstyle="primary"
         )
-        self.package_download_all_button.grid(row=3, column=0, sticky="e", padx=5, pady=(4, 0))
+        self.package_download_all_button.grid(row=0, column=1, sticky="ew", padx=(0, 5))
 
-        # Upload row (row 4)
+        # Upload row (Entry, Browse, Upload)
         self.package_upload_var = StringVar()
-        self.package_upload_entry = tb.Entry(self.package_attachment_frame, textvariable=self.package_upload_var,
+        self.package_upload_entry = tb.Entry(self.package_attachment_controls_frame, textvariable=self.package_upload_var,
                                              width=30, state="readonly")
-        self.package_browse_button = tb.Button(self.package_attachment_frame, text="Browse File",
+        self.package_upload_entry.grid(row=0, column=2, sticky="ew", padx=(0, 5))
+        self.package_browse_button = tb.Button(self.package_attachment_controls_frame, text="Browse File",
                                                command=self.browse_package_file, bootstyle="primary")
-        self.package_upload_button = tb.Button(self.package_attachment_frame, text="Upload File",
+        self.package_browse_button.grid(row=0, column=3, sticky="ew", padx=(0, 5))
+        self.package_upload_button = tb.Button(self.package_attachment_controls_frame, text="Upload File",
                                                command=self.upload_package_attachment, bootstyle="primary")
-        self.package_browse_button.grid(row=4, column=0, sticky="w", padx=(0, 5), pady=(8, 0))
-        self.package_upload_entry.grid(row=4, column=0, sticky="e", padx=(0, 120), pady=(8, 0))
-        self.package_upload_button.grid(row=4, column=0, sticky="e", padx=(0, 5), pady=(8, 0))
+        self.package_upload_button.grid(row=0, column=4, sticky="ew", padx=(0, 5))
 
         # Assemblies table
         self.assembly_frame = tb.Frame(self.attachments_frame)
@@ -296,7 +316,7 @@ class StratusGUI:
         self.assembly_table = self.create_table_with_scrollbars(
             self.assembly_frame,
             columns=("name", "description"),
-            column_widths=[150, 200],
+            column_widths=[350, 200],
             heading_map={"name": "Name", "description": "Description"}
         )
         self.assembly_table.bind("<<TreeviewSelect>>", self.fetch_assembly_attachments)
@@ -320,33 +340,39 @@ class StratusGUI:
         self.assembly_attachment_frame.columnconfigure(0, weight=1)
         self.assembly_attachment_frame.rowconfigure(0, weight=1)
 
-        # Download Selected button (row 2)
+        # Controls sub-frame for download buttons (row 1)
+        self.assembly_attachment_controls_frame = tb.Frame(self.assembly_attachment_frame)
+        self.assembly_attachment_controls_frame.grid(row=1, column=0, sticky="ew", padx=0, pady=(8, 0))
+        self.assembly_attachment_controls_frame.columnconfigure(0, weight=1)
+        self.assembly_attachment_controls_frame.columnconfigure(1, weight=0)
+
+        # Download Selected button
         self.assembly_download_selected_button = tb.Button(
-            self.assembly_attachment_frame, text="Download Selected",
+            self.assembly_attachment_controls_frame, text="Download Selected",
             command=self.download_selected_assembly_attachments,
-            width=20, bootstyle="primary"
+            width=18, bootstyle="primary"
         )
-        self.assembly_download_selected_button.grid(row=2, column=0, sticky="e", padx=5, pady=(8, 0))
+        self.assembly_download_selected_button.grid(row=0, column=0, sticky="ew", padx=(0, 5))
 
-        # Download All button (row 3)
+        # Download All button
         self.assembly_download_all_button = tb.Button(
-            self.assembly_attachment_frame, text="Download All",
+            self.assembly_attachment_controls_frame, text="Download All",
             command=self.download_all_assembly_attachments,
-            width=20, bootstyle="primary"
+            width=14, bootstyle="primary"
         )
-        self.assembly_download_all_button.grid(row=3, column=0, sticky="e", padx=5, pady=(4, 0))
+        self.assembly_download_all_button.grid(row=0, column=1, sticky="ew", padx=(0, 5))
 
-        # Upload row (row 4)
+        # Upload row (Entry, Browse, Upload)
         self.assembly_upload_var = StringVar()
-        self.assembly_upload_entry = tb.Entry(self.assembly_attachment_frame, textvariable=self.assembly_upload_var,
+        self.assembly_upload_entry = tb.Entry(self.assembly_attachment_controls_frame, textvariable=self.assembly_upload_var,
                                               width=30, state="readonly")
-        self.assembly_browse_button = tb.Button(self.assembly_attachment_frame, text="Browse File",
+        self.assembly_upload_entry.grid(row=0, column=2, sticky="ew", padx=(0, 5))
+        self.assembly_browse_button = tb.Button(self.assembly_attachment_controls_frame, text="Browse File",
                                                 command=self.browse_assembly_file, bootstyle="primary")
-        self.assembly_upload_button = tb.Button(self.assembly_attachment_frame, text="Upload File",
+        self.assembly_browse_button.grid(row=0, column=3, sticky="ew", padx=(0, 5))
+        self.assembly_upload_button = tb.Button(self.assembly_attachment_controls_frame, text="Upload File",
                                                 command=self.upload_assembly_attachment, bootstyle="primary")
-        self.assembly_browse_button.grid(row=4, column=0, sticky="w", padx=(0, 5), pady=(8, 0))
-        self.assembly_upload_entry.grid(row=4, column=0, sticky="e", padx=(0, 120), pady=(8, 0))
-        self.assembly_upload_button.grid(row=4, column=0, sticky="e", padx=(0, 5), pady=(8, 0))
+        self.assembly_upload_button.grid(row=0, column=4, sticky="ew", padx=(0, 5))
 
         # Package Properties tab
         self.properties_frame = tb.Frame(self.notebook)
@@ -460,8 +486,8 @@ class StratusGUI:
 #------------------------------------------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------------------------------------------
 
-    def create_table_with_scrollbars(self, parent, columns, column_widths, heading_map=None):
-        table = tb.Treeview(parent, columns=columns, show="headings", bootstyle="dark")
+    def create_table_with_scrollbars(self, parent, columns, column_widths, heading_map=None, height=12):
+        table = tb.Treeview(parent, columns=columns, show="headings", bootstyle="dark", height=height)
         for i, col in enumerate(columns):
             heading = heading_map[col] if heading_map and col in heading_map else col.replace("_", " ").title()
             table.heading(col, text=heading)
@@ -523,59 +549,27 @@ class StratusGUI:
         max_width += 20
         tree.column(col_id, width=max_width)
 
-    def clear_table(self, table):
+    def clear_table(self, table: tb.Treeview) -> None:
         for item in table.get_children():
             table.delete(item)
 
-    def on_tab_changed(self, event):
-        """Fetch data for new tabs when selected."""
-        selected_tab = self.notebook.index(self.notebook.select())
-        tab_name = self.notebook.tab(selected_tab, "text")
-        if tab_name == "Activity Logs" and not self.tab_data_fetched["activity_logs"]:
-            self.fetch_activity_logs()
-            self.tab_data_fetched["activity_logs"] = True
-        elif tab_name == "Users" and not self.tab_data_fetched["users"]:
-            self.fetch_users()
-            self.tab_data_fetched["users"] = True
-        elif tab_name == "Containers" and not self.tab_data_fetched["containers"]:
-            self.fetch_containers()
-            self.tab_data_fetched["containers"] = True
-        elif tab_name == "API Health" and not self.tab_data_fetched["health"]:
-            self.fetch_health()
-            self.tab_data_fetched["health"] = True
-        elif tab_name == "Tracking Statuses" and not self.tab_data_fetched["tracking_statuses"]:
-            self.fetch_tracking_statuses()
-            self.tab_data_fetched["tracking_statuses"] = True
-            
-    def _clear_placeholder(self, event, placeholder):
-        entry = event.widget
-        if entry.get() == placeholder:
-            entry.delete(0, tb.END)
-            entry.configure(foreground="white", font=("Arial", 10, "normal"))
-
-    def _restore_placeholder(self, event, placeholder):
-        entry = event.widget
-        if not entry.get():
-            entry.insert(0, placeholder)
-            entry.configure(foreground="gray", font=("Arial", 10, ""))
-
-    def _on_filter_keyrelease(self, event, item_type):
-        entry = event.widget
-        filter_text = entry.get().strip().lower()
-        placeholder = {"projects": "Filter Projects", "packages": "Filter Packages",
-                       "assemblies": "Filter Assemblies"}[item_type]
-        if filter_text == placeholder.lower():
-            filter_text = ""
-        self.filter_items(item_type, filter_text)
-
-    def add_placeholder(self, entry, placeholder):
-        entry.insert(0, placeholder)
-        entry.configure(foreground="gray", font=("Arial", 10, ""))
-        entry.bind("<FocusIn>", lambda e: self._clear_placeholder(e, placeholder))
-        entry.bind("<FocusOut>", lambda e: self._restore_placeholder(e, placeholder))
-        entry.bind("<KeyRelease>", lambda e: self._on_filter_keyrelease(e, entry._item_type))
-        entry.bind("<Button-1>", lambda e: entry.focus_set())
-        entry._item_type = placeholder.split()[1].lower()  # e.g., "projects", "packages", "assemblies"
+    def clear_tables_and_fields(self):
+        # Clear package table
+        self.clear_table(self.package_table)
+        # Clear package attachments table
+        self.clear_table(self.package_attachment_table)
+        self.package_no_attachments_label.place_forget()
+        # Clear assembly table
+        self.clear_table(self.assembly_table)
+        # Clear assembly attachments table
+        self.clear_table(self.assembly_attachment_table)
+        self.assembly_no_attachments_label.place_forget()
+        # Reset property fields
+        for var in self.property_fields.values():
+            var.set("")
+        self.unsaved_alert.grid_remove()
+        self.selected_package_id = None
+        self.selected_assembly_id = None
 
     def filter_items(self, item_type: str, filter_text: str = "") -> None:
         source = (self.all_projects if item_type == "projects" else
@@ -625,7 +619,7 @@ class StratusGUI:
                     self.assembly_no_attachments_label.place_forget()
                     self.selected_assembly_id = None
 
-    def update_table(self, item_type):
+    def update_table(self, item_type: str) -> None:
         table = self.package_table if item_type == "packages" else self.assembly_table
         items = self.packages if item_type == "packages" else self.assemblies
         attachment_table = self.package_attachment_table if item_type == "packages" else self.assembly_attachment_table
@@ -647,14 +641,55 @@ class StratusGUI:
                     var.set("")
                 self.unsaved_alert.grid_remove()
 
-    def clear_tables_and_fields(self):
-        for table in [self.package_table, self.package_attachment_table, self.assembly_table, self.assembly_attachment_table]:
-            self.clear_table(table)
-        for var in self.property_fields.values():
-            var.set("")
-        self.unsaved_alert.grid_remove()
-        self.package_no_attachments_label.place_forget()
-        self.assembly_no_attachments_label.place_forget()
+    def _clear_placeholder(self, event, placeholder):
+        entry = event.widget
+        if entry.get() == placeholder:
+            entry.delete(0, tb.END)
+            entry.configure(foreground="white", font=("Arial", 10, "normal"))
+
+    def _restore_placeholder(self, event, placeholder):
+        entry = event.widget
+        if not entry.get():
+            entry.insert(0, placeholder)
+            entry.configure(foreground="gray", font=("Arial", 10, ""))
+
+    def _on_filter_keyrelease(self, event, item_type):
+        entry = event.widget
+        filter_text = entry.get().strip().lower()
+        placeholder = {"projects": "Filter Projects", "packages": "Filter Packages",
+                       "assemblies": "Filter Assemblies"}[item_type]
+        if filter_text == placeholder.lower():
+            filter_text = ""
+        self.filter_items(item_type, filter_text)
+
+    def add_placeholder(self, entry, placeholder):
+        entry.insert(0, placeholder)
+        entry.configure(foreground="gray", font=("Arial", 10, ""))
+        entry.bind("<FocusIn>", lambda e: self._clear_placeholder(e, placeholder))
+        entry.bind("<FocusOut>", lambda e: self._restore_placeholder(e, placeholder))
+        entry.bind("<KeyRelease>", lambda e: self._on_filter_keyrelease(e, entry._item_type))
+        entry.bind("<Button-1>", lambda e: entry.focus_set())
+        entry._item_type = placeholder.split()[1].lower()  # e.g., "projects", "packages", "assemblies"
+
+    def on_tab_changed(self, event):
+        """Fetch data for new tabs when selected."""
+        selected_tab = self.notebook.index(self.notebook.select())
+        tab_name = self.notebook.tab(selected_tab, "text")
+        if tab_name == "Activity Logs" and not self.tab_data_fetched["activity_logs"]:
+            self.fetch_activity_logs()
+            self.tab_data_fetched["activity_logs"] = True
+        elif tab_name == "Users" and not self.tab_data_fetched["users"]:
+            self.fetch_users()
+            self.tab_data_fetched["users"] = True
+        elif tab_name == "Containers" and not self.tab_data_fetched["containers"]:
+            self.fetch_containers()
+            self.tab_data_fetched["containers"] = True
+        elif tab_name == "API Health" and not self.tab_data_fetched["health"]:
+            self.fetch_health()
+            self.tab_data_fetched["health"] = True
+        elif tab_name == "Tracking Statuses" and not self.tab_data_fetched["tracking_statuses"]:
+            self.fetch_tracking_statuses()
+            self.tab_data_fetched["tracking_statuses"] = True
 
     def fetch_projects(self) -> None:
         """Fetch the list of projects from the API and update the dropdown."""
@@ -1035,55 +1070,38 @@ class StratusGUI:
         except RequestException as e:
             handle_request_error(e, "Failed to apply properties")
 
-    def download_selected_package_attachments(self):
-        selected = self.package_attachment_table.selection()
-        if not selected:
-            messagebox.showwarning("No Selection", "Please select at least one package attachment to download.")
-            return
+    def download_attachments(self, attachments, table, selection_only=False):
+        if selection_only:
+            selected = table.selection()
+            if not selected:
+                messagebox.showwarning("No Selection", "Please select at least one attachment to download.")
+                return
+            items = [table.item(item) for item in selected]
+        else:
+            if not attachments:
+                messagebox.showwarning("No Attachments", "No attachments available to download.")
+                return
+            items = [{"tags": (att.get("id", ""),), "values": (att.get("fileName", f"attachment_{att.get('id', '')}"),)} for att in attachments]
+
         save_dir = filedialog.askdirectory(title="Select Download Directory")
         if not save_dir:
             return
-        for item in selected:
-            att_id = self.package_attachment_table.item(item)["tags"][0]
-            file_name = self.package_attachment_table.item(item)["values"][0] or f"attachment_{att_id}"
+        for item in items:
+            att_id = item["tags"][0]
+            file_name = item["values"][0] or f"attachment_{att_id}"
             self.download_attachment(att_id, file_name, save_dir)
+
+    def download_selected_package_attachments(self):
+        self.download_attachments(self.package_attachments, self.package_attachment_table, selection_only=True)
 
     def download_all_package_attachments(self):
-        if not self.package_attachments:
-            messagebox.showwarning("No Package Attachments", "No package attachments available to download.")
-            return
-        save_dir = filedialog.askdirectory(title="Select Download Directory")
-        if not save_dir:
-            return
-        for att in self.package_attachments:
-            att_id = att.get("id", "")
-            file_name = att.get("fileName", f"attachment_{att_id}")
-            self.download_attachment(att_id, file_name, save_dir)
+        self.download_attachments(self.package_attachments, self.package_attachment_table, selection_only=False)
 
     def download_selected_assembly_attachments(self):
-        selected = self.assembly_attachment_table.selection()
-        if not selected:
-            messagebox.showwarning("No Selection", "Please select at least one assembly attachment to download.")
-            return
-        save_dir = filedialog.askdirectory(title="Select Download Directory")
-        if not save_dir:
-            return
-        for item in selected:
-            att_id = self.assembly_attachment_table.item(item)["tags"][0]
-            file_name = self.assembly_attachment_table.item(item)["values"][0] or f"attachment_{att_id}"
-            self.download_attachment(att_id, file_name, save_dir)
+        self.download_attachments(self.assembly_attachments, self.assembly_attachment_table, selection_only=True)
 
     def download_all_assembly_attachments(self):
-        if not self.assembly_attachments:
-            messagebox.showwarning("No Assembly Attachments", "No assembly attachments available to download.")
-            return
-        save_dir = filedialog.askdirectory(title="Select Download Directory")
-        if not save_dir:
-            return
-        for att in self.assembly_attachments:
-            att_id = att.get("id", "")
-            file_name = att.get("fileName", f"attachment_{att_id}")
-            self.download_attachment(att_id, file_name, save_dir)
+        self.download_attachments(self.assembly_attachments, self.assembly_attachment_table, selection_only=False)
 
     def download_attachment(self, att_id, file_name, save_dir):
         try:
@@ -1201,8 +1219,8 @@ class StratusGUI:
 
 if __name__ == "__main__":
     root = tb.Window(themename="darkly")
-    window_width = 1700
-    window_height = 680
+    window_width = 2920
+    window_height = 1220
     screen_width = root.winfo_screenwidth()
     screen_height = root.winfo_screenheight()
     x = (screen_width - window_width) // 2
