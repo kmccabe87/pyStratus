@@ -15,16 +15,26 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import os
+import sys
 import requests
 import ttkbootstrap as tb
 from datetime import datetime
 from PIL import Image, ImageTk
 from requests.exceptions import RequestException, HTTPError
 from tkinter import Toplevel, messagebox, filedialog, StringVar
-import tkinter.font as tkfont
 import time
 import random
 import logging
+
+# DPI awareness (Windows only) - must be set before any Tkinter code
+if sys.platform == "win32":
+    try:
+        from ctypes import windll
+        windll.shcore.SetProcessDpiAwareness(1)  # or 2 for per-monitor DPI
+    except Exception:
+        pass
+
+import tkinter.font as tkfont  # Import here, but don't use until after root is created
 
 logging.basicConfig(level=logging.INFO)
 
@@ -174,8 +184,6 @@ class StratusGUI:
     def setup_left_frame(self):
         self.left_frame = tb.Frame(self.main_frame)
         self.left_frame.grid(row=0, column=0, sticky="ns", padx=5)
-        # Do NOT set self.main_frame.columnconfigure(0, weight=1) for the left frame!
-        self.main_frame.columnconfigure(0, weight=0)  # Fixed width
 
         # Project dropdown and filter
         self.project_label = tb.Label(self.left_frame, text="Select Project:")
@@ -236,10 +244,6 @@ class StratusGUI:
         # Attachments tab
         self.attachments_frame = tb.Frame(self.notebook)
         self.notebook.add(self.attachments_frame, text="Attachments")
-        self.attachments_frame.columnconfigure(0, weight=1)  # Package side (optional, if you want both sides to expand)
-        self.attachments_frame.columnconfigure(1, weight=1)  # Assembly side (right)
-        self.attachments_frame.rowconfigure(0, weight=1)
-        self.attachments_frame.rowconfigure(1, weight=1)
 
         # Packages table
         self.package_frame = tb.Frame(self.attachments_frame)
@@ -423,10 +427,14 @@ class StratusGUI:
             "modelName", "reference", "referenceName", "action", "actionName", "name", "value", "trackingStatusName", 
             "trackingStatusColor", "stationName"
         ]
+        column_widths = [
+            140, 120, 120, 80, 140, 100, 80, 120, 100, 120, 80, 120, 120, 120, 140, 120, 140
+        ]
         self.activity_table = self.create_table_with_scrollbars(
             self.activity_frame,
             columns=activity_columns,
-            column_widths=[150] * len(activity_columns)
+            column_widths=column_widths,
+            stretch_columns=["stationName"]  # Only the last column stretches
         )
         
         # Users tab
@@ -486,13 +494,15 @@ class StratusGUI:
 #------------------------------------------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------------------------------------------
 
-    def create_table_with_scrollbars(self, parent, columns, column_widths, heading_map=None, height=12):
+    def create_table_with_scrollbars(self, parent, columns, column_widths, heading_map=None, height=12, stretch_columns=None):
         table = tb.Treeview(parent, columns=columns, show="headings", bootstyle="dark", height=height)
+        if stretch_columns is None:
+            stretch_columns = []
         for i, col in enumerate(columns):
             heading = heading_map[col] if heading_map and col in heading_map else col.replace("_", " ").title()
+            stretch = col in stretch_columns
             table.heading(col, text=heading)
-            table.column(col, width=column_widths[i] if i < len(column_widths) else 100, anchor="w", stretch=False)
-        # No extra padding so scrollbars touch the table
+            table.column(col, width=column_widths[i] if i < len(column_widths) else 100, anchor="w", stretch=stretch)
         table.grid(row=0, column=0, sticky="nsew")
 
         # Vertical scrollbar
@@ -1219,12 +1229,19 @@ class StratusGUI:
 
 if __name__ == "__main__":
     root = tb.Window(themename="darkly")
-    window_width = 2920
-    window_height = 1220
+
+    # Set default font size after root is created (for DPI scaling)
+    default_font = tkfont.nametofont("TkDefaultFont")
+    default_font.configure(size=12)  # Adjust as needed for your app
+
+    # Dynamic window sizing for 2K/4K support
     screen_width = root.winfo_screenwidth()
     screen_height = root.winfo_screenheight()
+    window_width = int(screen_width * 0.8)
+    window_height = int(screen_height * 0.8)
     x = (screen_width - window_width) // 2
     y = (screen_height - window_height) // 2
     root.geometry(f"{window_width}x{window_height}+{x}+{y}")
+
     app = StratusGUI(root)
     root.mainloop()
