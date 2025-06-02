@@ -637,7 +637,7 @@ class StratusGUI:
         self.clear_table(table)
         if item_type == "packages":
             for item in items:
-                table.insert("", "end", values=(item.get("name", ""), item.get("description", ""), item.get("assembly_count", 0)),
+                table.insert("", "end", values=(item.get("name", ""), item.get("assembly_count", 0), item.get("description", "")),
                              tags=(item.get("id", ""),))
         else:
             for item in items:
