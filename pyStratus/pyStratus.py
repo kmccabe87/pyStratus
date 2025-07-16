@@ -174,6 +174,8 @@ class StratusGUI:
         self.package_data = {}
         self.property_fields = {}
         self.initial_field_values = {}
+        self.package_files = []
+        self.assembly_files = []
 
     def setup_main_frame(self):
         self.main_frame = tb.Frame(self.root, padding="10")
@@ -307,10 +309,10 @@ class StratusGUI:
         self.package_upload_entry = tb.Entry(self.package_attachment_controls_frame, textvariable=self.package_upload_var,
                                              width=30, state="readonly")
         self.package_upload_entry.grid(row=0, column=2, sticky="ew", padx=(0, 5))
-        self.package_browse_button = tb.Button(self.package_attachment_controls_frame, text="Browse File",
+        self.package_browse_button = tb.Button(self.package_attachment_controls_frame, text="Browse Files",
                                                command=self.browse_package_file, bootstyle="primary")
         self.package_browse_button.grid(row=0, column=3, sticky="ew", padx=(0, 5))
-        self.package_upload_button = tb.Button(self.package_attachment_controls_frame, text="Upload File",
+        self.package_upload_button = tb.Button(self.package_attachment_controls_frame, text="Upload Files",
                                                command=self.upload_package_attachment, bootstyle="primary")
         self.package_upload_button.grid(row=0, column=4, sticky="ew", padx=(0, 5))
 
@@ -371,10 +373,10 @@ class StratusGUI:
         self.assembly_upload_entry = tb.Entry(self.assembly_attachment_controls_frame, textvariable=self.assembly_upload_var,
                                               width=30, state="readonly")
         self.assembly_upload_entry.grid(row=0, column=2, sticky="ew", padx=(0, 5))
-        self.assembly_browse_button = tb.Button(self.assembly_attachment_controls_frame, text="Browse File",
+        self.assembly_browse_button = tb.Button(self.assembly_attachment_controls_frame, text="Browse Files",
                                                 command=self.browse_assembly_file, bootstyle="primary")
         self.assembly_browse_button.grid(row=0, column=3, sticky="ew", padx=(0, 5))
-        self.assembly_upload_button = tb.Button(self.assembly_attachment_controls_frame, text="Upload File",
+        self.assembly_upload_button = tb.Button(self.assembly_attachment_controls_frame, text="Upload Files",
                                                 command=self.upload_assembly_attachment, bootstyle="primary")
         self.assembly_upload_button.grid(row=0, column=4, sticky="ew", padx=(0, 5))
 
@@ -519,13 +521,12 @@ class StratusGUI:
         parent.rowconfigure(0, weight=1)
 
         # Bind double-click on header separator for auto-size
-        table.bind('<Button-1>', lambda e, t=table: self._treeview_separator_click(e, t), add="+")
-        table.bind('<Double-Button-1>', lambda e, t=table: self._treeview_separator_double_click(e, t), add="+")
+        table.bind("<Button-1>", lambda e, t=table: self._treeview_separator_click(e, t), add="+")
+        table.bind("<Double-1>", lambda e, t=table: self._treeview_separator_double_click(e, t), add="+")
 
         return table
 
     def _treeview_separator_click(self, event, tree):
-        # Store the column being resized (Tkinter doesn't provide this directly, so we use identify_region/column)
         region = tree.identify_region(event.x, event.y)
         if region == "separator":
             tree._resizing_column = tree.identify_column(event.x)
@@ -533,14 +534,13 @@ class StratusGUI:
             tree._resizing_column = None
 
     def _treeview_separator_double_click(self, event, tree):
-        # Only auto-size if double-clicked on a separator
         region = tree.identify_region(event.x, event.y)
         if region != "separator":
             return
         col = tree.identify_column(event.x)
         if not col:
             return
-        col_id = tree["columns"][int(col[1:]) - 1]  # col is like '#1', '#2', etc.
+        col_id = tree["columns"][int(col[1:]) - 1]  # col is like '#1", '#2', etc.
 
         # Get font used in the treeview
         style = tree.cget("style") or "Treeview"
@@ -582,8 +582,12 @@ class StratusGUI:
         self.selected_assembly_id = None
 
     def filter_items(self, item_type: str, filter_text: str = "") -> None:
-        source = (self.all_projects if item_type == "projects" else
-                  self.all_packages if item_type == "packages" else self.all_assemblies)
+        if item_type == "projects":
+            source = self.all_projects
+        elif item_type == "packages":
+            source = self.all_packages
+        else:
+            source = self.all_assemblies
         filtered = source if not filter_text else [
             item for item in source if filter_text in item.get("name", "").lower()
         ]
@@ -817,14 +821,14 @@ class StratusGUI:
             messagebox.showerror("Error", f"Failed to fetch activity logs: {e}")
         
     def fetch_users(self):
-        params = {"include": "id,firstName,lastName,email,status", "pagesize": PAGE_SIZE, "disabletotal": True}
+        params = {"include": "id,firstName, lastName, email,status", "pagesize": PAGE_SIZE, "disabletotal": True}
         try:
             response = make_api_request(f"{BASE_URL}{ENDPOINTS['user']}", self.headers, params, "Fetch users")
             self.users = response.json().get("data", [])
             self.clear_table(self.users_table)
             for user in self.users:
                 status = "Active" if user.get("status") == 1 else "Disabled"
-                self.users_table.insert("", "end",
+                self.users_table.insert("", "end", 
                                         values=(user.get("firstName", ""),
                                                 user.get("lastName", ""),
                                                 user.get("email", ""),
@@ -847,7 +851,7 @@ class StratusGUI:
                                                      container.get("description", "")))
             if not self.containers:
                 messagebox.showinfo("No Containers", "No containers found.")
-        except RequestException:
+        except RequestException as e:
             pass
 
     def fetch_health(self):
@@ -902,9 +906,9 @@ class StratusGUI:
             response = make_api_request(f"{BASE_URL}/v1/company/tracking-statuses", 
                                       self.headers, params, "Fetch tracking statuses")
             # Debug: Log raw response to inspect data
-            data = response.json()
             logging.debug(f"Tracking Statuses Response: {data}")
             # Handle case where response is a list directly
+            data = response.json()
             if isinstance(data, list):
                 self.tracking_statuses = data
             else:
@@ -944,7 +948,7 @@ class StratusGUI:
         for key, var in self.property_fields.items():
             if key == "status":
                 value = self.package_data.get(key, 0)
-                var.set(f"Active (0)" if value == 0 else "Archived (1)")
+                var.set("Active (0)" if value == 0 else "Archived (1)")
             else:
                 var.set(self.package_data.get(key, "") or "")
             self.initial_field_values[key] = var.get()
@@ -1127,30 +1131,52 @@ class StratusGUI:
             messagebox.showerror("Error", f"Failed to download/save attachment {file_name}: {e}")
 
     def browse_package_file(self):
-        file_path = filedialog.askopenfilename(title="Select File to Upload")
-        if file_path:
-            self.package_upload_var.set(file_path)
+        file_paths = filedialog.askopenfilenames(title="Select Files to Upload")
+        if file_paths:
+            self.package_files = list(file_paths)
+            if len(file_paths) > 1:
+                self.package_upload_var.set(f"{len(file_paths)} files selected")
+            else:
+                self.package_upload_var.set(file_paths[0])
 
     def browse_assembly_file(self):
-        file_path = filedialog.askopenfilename(title="Select File to Upload")
-        if file_path:
-            self.assembly_upload_var.set(file_path)
+        file_paths = filedialog.askopenfilenames(title="Select Files to Upload")
+        if file_paths:
+            self.assembly_files = list(file_paths)
+            if len(file_paths) > 1:
+                self.assembly_upload_var.set(f"{len(file_paths)} files selected")
+            else:
+                self.assembly_upload_var.set(file_paths[0])
 
     def upload_attachment(self, endpoint: str, file_var: StringVar, refresh_callback: callable) -> None:
-        file_path = file_var.get()
-        if not file_path or not os.path.exists(file_path):
+        file_paths = self.package_files if "package" in endpoint else self.assembly_files
+        if not file_paths:
             messagebox.showwarning(NO_FILE_SELECTED, "Please select a valid file to upload.")
             return
-        try:
-            with open(file_path, "rb") as f:
-                files = {"file": (os.path.basename(file_path), f)}
-                response = requests.post(endpoint, headers=self.headers, files=files, timeout=10)
-                response.raise_for_status()
-                messagebox.showinfo("Success", f"Successfully uploaded {os.path.basename(file_path)}")
-                file_var.set("")
-                refresh_callback()
-        except (RequestException, OSError) as e:
-            messagebox.showerror("Error", f"Failed to upload attachment: {e}")
+        successes = []
+        errors = []
+        for file_path in file_paths:
+            if not os.path.exists(file_path):
+                errors.append(f"File not found: {file_path}")
+                continue
+            try:
+                with open(file_path, "rb") as f:
+                    files = {"file": (os.path.basename(file_path), f)}
+                    response = requests.post(endpoint, headers=self.headers, files=files, timeout=10)
+                    response.raise_for_status()
+                successes.append(os.path.basename(file_path))
+            except (RequestException, OSError) as e:
+                errors.append(f"Failed to upload {os.path.basename(file_path)}: {str(e)}")
+        file_var.set("")
+        if "package" in endpoint:
+            self.package_files = []
+        else:
+            self.assembly_files = []
+        refresh_callback()
+        if successes:
+            messagebox.showinfo("Success", f"Successfully uploaded: {', '.join(successes)}")
+        if errors:
+            messagebox.showerror("Errors", '\n'.join(errors))
 
     def upload_package_attachment(self):
         if not self.selected_package_id:
